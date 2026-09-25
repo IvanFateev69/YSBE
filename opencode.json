@@ -1,0 +1,11 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "opencode-go/qwen3.8-flash",
+  "mcp": {
+    "ysbe": {
+      "type": "local",
+      "command": ["node", "server/index.js"],
+      "enabled": true
+    }
+  }
+}

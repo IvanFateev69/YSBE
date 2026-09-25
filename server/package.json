@@ -1,0 +1,16 @@
+{
+  "name": "ysbe-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Минимальный MCP-сервер для автоматизации Яндекс Учебника через Chromium",
+  "scripts": {
+    "start": "node index.js",
+    "login": "node login.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.49.0",
+    "zod": "^3.24.0"
+  }
+}
