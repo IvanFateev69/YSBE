@@ -12,12 +12,12 @@ const context = await chromium.launchPersistentContext(PROFILE_DIR, {
 });
 
 const page = context.pages()[0] || (await context.newPage());
-await page.goto('https://education.yandex.ru/uchebnik/main', {
+await page.goto('https://education.yandex.ru/schoolbook', {
   waitUntil: 'domcontentloaded',
 });
 
-console.log('Войдите в свой аккаунт Яндекса в открывшемся окне.');
-console.log('После успешного входа просто закройте окно браузера — сессия сохранится.');
+console.log('В открывшемся окне нажмите «Войти с Яндекс ID» и войдите в аккаунт.');
+console.log('Когда страница покажет, что вы вошли, закройте окно браузера — сессия сохранится.');
 
 await new Promise((resolve) => context.on('close', resolve));
 console.log('Сессия сохранена в server/.profile/');

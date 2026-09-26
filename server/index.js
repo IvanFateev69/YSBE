@@ -53,7 +53,8 @@ async function firstVisible(p, selectors) {
 }
 
 const EDITOR_SELECTORS = [
-  '.monaco-editor',
+  '.cm-editor [contenteditable]',
+  '.monaco-editor textarea',
   '.CodeMirror',
   '[class*="code-editor"]',
   '[class*="editor"] textarea',
@@ -61,17 +62,21 @@ const EDITOR_SELECTORS = [
 ];
 
 const TASK_TEXT_SELECTORS = [
+  '[class*="instruction"]',
   '[class*="statement"]',
   '[class*="task-description"]',
   '[class*="task__text"]',
   '[class*="condition"]',
   '[class*="theory"]',
+  '[class*="--info"]',
   'article',
   'main',
 ];
 
-const RUN_BUTTON_TEXTS = ['Проверить', 'Запустить', 'Отправить', 'Run', 'Check', 'Submit'];
-const NEXT_BUTTON_TEXTS = ['Далее', 'Следующая', 'Продолжить', 'Дальше', 'Next', 'Continue'];
+const RUN_BUTTON_TEXTS = ['Запустить', 'Проверить', 'Run', 'Check'];
+const SUBMIT_BUTTON_TEXTS = ['Ответить', 'Отправить', 'Submit'];
+const NEXT_BUTTON_TEXTS = ['Дальше', 'Продолжение', 'Далее', 'Продолжить', 'Начать', 'Следующая', 'Next', 'Continue'];
+const FINISH_BUTTON_TEXTS = ['Завершить', 'Закончить', 'Finish'];
 
 function cleanText(t) {
   return t.replace(/[ \t]+/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
@@ -79,7 +84,7 @@ function cleanText(t) {
 
 async function detectType(p) {
   if (await firstVisible(p, EDITOR_SELECTORS)) return 'code';
-  const radio = await p.locator('input[type="radio"], [role="radio"]').count();
+  const radio = await p.locator('input[type="radio"], [role="radio"], [class*="option"], [class*="variant"]').count();
   const checkbox = await p.locator('input[type="checkbox"], [role="checkbox"]').count();
   if (radio + checkbox > 0) return 'test';
   return 'theory';
@@ -123,7 +128,7 @@ server.tool(
   {},
   async () => {
     const p = await getPage();
-    await p.waitForLoadState('domcontentloaded').catch(() => {});
+    await p.locator('[class*="instruction"], .cm-editor').first().waitFor({ state: 'visible', timeout: 15000 }).catch(() => {});
     const type = await detectType(p);
     const block = await firstVisible(p, TASK_TEXT_SELECTORS);
     let text = block ? await block.innerText() : await p.locator('body').innerText();
@@ -183,21 +188,39 @@ server.tool(
 
 server.tool(
   'read_result',
-  'Прочитать результат проверки: зачёт или текст ошибки',
+  'Прочитать результат проверки: passed, если кнопка «Ответить» активна, иначе текст вывода/ошибки',
   {},
   async () => {
     const p = await getPage();
-    const loc = await firstVisible(p, [
-      '[class*="success"]',
-      '[class*="error"]:not([class*="boundary"])',
-      '[class*="verdict"]',
-      '[class*="result"]',
+    const otvet = p.locator('button:has-text("Ответить")').first();
+    const canSubmit = (await otvet.count()) > 0 && (await otvet.isEnabled().catch(() => false));
+    let details = '';
+    const out = await firstVisible(p, [
+      '[class*="tests"]',
       '[class*="output"]',
+      '[class*="result"]',
       '[role="alert"]',
+      '[class*="error"]:not([class*="boundary"])',
     ]);
-    let text = loc ? await loc.innerText() : '';
-    text = cleanText(text || 'результат не найден').slice(0, 2000);
-    return { content: [{ type: 'text', text }] };
+    if (out) details = cleanText(await out.innerText()).slice(0, 1500);
+    return {
+      content: [{ type: 'text', text: JSON.stringify({ verdict: canSubmit ? 'passed' : 'not_passed', details }) }],
+    };
+  }
+);
+
+server.tool(
+  'submit',
+  'Отправить решение (кнопка «Ответить») после успешной проверки',
+  {},
+  async () => {
+    const p = await getPage();
+    const clicked = await clickButtonByText(p, SUBMIT_BUTTON_TEXTS);
+    if (!clicked) {
+      return { content: [{ type: 'text', text: 'error: кнопка «Ответить» не найдена или неактивна' }] };
+    }
+    await sleep(2000);
+    return { content: [{ type: 'text', text: 'ok' }] };
   }
 );
 
@@ -253,13 +276,19 @@ server.tool(
 
 server.tool(
   'next_task',
-  'Перейти к следующей карточке. Возвращает done, если карточки закончились',
+  'Перейти дальше (кнопки «Дальше»/«Продолжение»/«Начать»). Возвращает done, если задание завершено',
   {},
   async () => {
     const p = await getPage();
+    const finish = await firstVisible(p, FINISH_BUTTON_TEXTS.map((t) => `button:has-text("${t}")`));
+    if (finish) {
+      await finish.click().catch(() => {});
+      await sleep(2000);
+      return { content: [{ type: 'text', text: 'done' }] };
+    }
     const clicked = await clickButtonByText(p, NEXT_BUTTON_TEXTS);
     if (!clicked) return { content: [{ type: 'text', text: 'done' }] };
-    await sleep(2000);
+    await sleep(2500);
     return { content: [{ type: 'text', text: 'ok' }] };
   }
 );
