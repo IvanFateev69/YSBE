@@ -62,13 +62,13 @@ const EDITOR_SELECTORS = [
 ];
 
 const TASK_TEXT_SELECTORS = [
-  '[class*="instruction"]',
+  '[class*="--info"]',
   '[class*="statement"]',
   '[class*="task-description"]',
   '[class*="task__text"]',
   '[class*="condition"]',
   '[class*="theory"]',
-  '[class*="--info"]',
+  '[class*="instruction"]',
   'article',
   'main',
 ];
@@ -119,6 +119,18 @@ server.tool(
     return {
       content: [{ type: 'text', text: JSON.stringify({ url: p.url(), title: await p.title() }) }],
     };
+  }
+);
+
+server.tool(
+  'goto',
+  'Перейти по URL в управляемом браузере',
+  { url: z.string() },
+  async ({ url }) => {
+    const p = await getPage();
+    await p.goto(url, { waitUntil: 'commit', timeout: 60000 });
+    await sleep(4000);
+    return { content: [{ type: 'text', text: p.url() }] };
   }
 );
 
