@@ -165,7 +165,17 @@ tool(
         };
       })
     );
-    return { content: [{ type: 'text', text: JSON.stringify(btns) }] };
+    const opts = await p
+      .locator('label:visible, [role="radio"]:visible, [class*="option"]:visible, [class*="choice"]:visible, [class*="answer"]:not(button):visible')
+      .evaluateAll((els) =>
+        els.slice(0, 15).map((e) => ({
+          tag: e.tagName,
+          cls: (e.className || '').toString().slice(0, 60),
+          text: (e.innerText || '').trim().slice(0, 40),
+        }))
+      )
+      .catch(() => []);
+    return { content: [{ type: 'text', text: JSON.stringify({ btns, opts }) }] };
   }
 );
 
@@ -177,7 +187,7 @@ tool(
     const p = await getPage();
     await p.goto(url, { waitUntil: 'commit', timeout: 60000 });
     await p
-      .locator('button:has-text("Помощь"):visible')
+      .locator('button:has-text("Помощь"):visible, button:has-text("Начать"):visible, button:has-text("Дальше"):visible')
       .first()
       .waitFor({ state: 'visible', timeout: 30000 })
       .catch(() => {});
@@ -198,17 +208,34 @@ tool(
       .waitFor({ state: 'visible', timeout: 30000 })
       .catch(() => {});
     await sleep(500);
-    const type = await detectType(p);
+    const type0 = await detectType(p);
+    const inputs = await p
+      .locator('input[type="text"]:visible, input[type="number"]:visible, input:not([type]):visible, textarea:visible')
+      .count()
+      .catch(() => 0);
+    const type = type0 === 'theory' && inputs > 0 ? 'quiz' : type0;
     let block = null;
     const instr = p.locator('[class*="instruction"]:visible').first();
     if (await instr.isVisible().catch(() => false)) {
       block = instr.locator('xpath=..');
     }
     if (!block) block = await firstVisible(p, TASK_TEXT_SELECTORS);
-    let text = block ? await block.innerText() : await p.locator('body').innerText();
-    text = cleanText(text).slice(0, 3000);
+    let text = '';
+    try {
+      text = block ? await block.innerText({ timeout: 4000 }) : await p.locator('body').innerText({ timeout: 4000 });
+    } catch {
+      text = await p.locator('body').innerText().catch(() => '');
+    }
+    text = cleanText(text);
+    if (type === 'theory') {
+      text = text.slice(0, 180);
+    } else if (type === 'quiz') {
+      text = text.slice(0, 1200);
+    } else {
+      text = text.slice(0, 3000);
+    }
     return {
-      content: [{ type: 'text', text: JSON.stringify({ type, text }) }],
+      content: [{ type: 'text', text: JSON.stringify({ type, inputs, text }) }],
     };
   }
 );
@@ -323,15 +350,24 @@ tool(
   async ({ option, text }) => {
     const p = await getPage();
     if (text !== undefined) {
-      const input = await firstVisible(p, [
-        'input[type="text"]',
-        'input:not([type])',
-        'textarea',
-      ]);
-      if (!input) {
+      const inputs = p.locator(
+        'input[type="text"]:visible, input[type="number"]:visible, input:not([type]):visible, textarea:visible'
+      );
+      const count = await inputs.count().catch(() => 0);
+      let target = null;
+      for (let i = 0; i < count; i++) {
+        const el = inputs.nth(i);
+        const val = await el.inputValue().catch(() => null);
+        if (val !== null && val === '') {
+          target = el;
+          break;
+        }
+      }
+      if (!target && count > 0) target = inputs.first();
+      if (!target) {
         return { content: [{ type: 'text', text: 'error: поле ввода не найдено' }] };
       }
-      await input.click();
+      await target.click();
       await p.keyboard.press('Control+a');
       await p.keyboard.press('Delete');
       for (const ch of text) {
@@ -341,23 +377,26 @@ tool(
       return { content: [{ type: 'text', text: 'ok' }] };
     }
     if (option !== undefined) {
-      let target = null;
       const n = Number(option);
+      const candidates = [];
       if (Number.isInteger(n) && n > 0) {
-        target = p
-          .locator('input[type="radio"], [role="radio"], input[type="checkbox"], [role="checkbox"]')
-          .nth(n - 1);
+        candidates.push(`label.radio:visible >> nth=${n - 1}`);
+        candidates.push(`label.marker:visible >> nth=${n - 1}`);
+        candidates.push(`[role="radio"]:visible, input[type="radio"]:visible >> nth=${n - 1}`);
       } else {
-        target = p
-          .locator(`label:has-text("${option}"), [role="radio"]:has-text("${option}")`)
-          .first();
+        candidates.push(`label:has-text("${option}"):visible >> nth=0`);
+        candidates.push(`[role="radio"]:has-text("${option}"):visible >> nth=0`);
       }
-      try {
-        await target.click({ timeout: 3000 });
-        return { content: [{ type: 'text', text: 'ok' }] };
-      } catch {
-        return { content: [{ type: 'text', text: 'error: вариант не найден' }] };
+      for (const sel of candidates) {
+        try {
+          const target = p.locator(sel);
+          if ((await target.count().catch(() => 0)) > 0) {
+            await target.first().click({ timeout: 2500 });
+            return { content: [{ type: 'text', text: 'ok' }] };
+          }
+        } catch {}
       }
+      return { content: [{ type: 'text', text: 'error: вариант не найден' }] };
     }
     return { content: [{ type: 'text', text: 'error: нужен option или text' }] };
   }
