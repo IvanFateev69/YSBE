@@ -117,8 +117,10 @@ async function clickButtonByText(p, texts) {
     for (let i = 0; i < n; i++) {
       const el = locs.nth(i);
       if (await el.isVisible().catch(() => false)) {
-        await el.click({ timeout: 3000 }).catch(() => {});
-        return t;
+        try {
+          await el.click({ timeout: 3000 });
+          return t;
+        } catch {}
       }
     }
   }
@@ -140,8 +142,19 @@ tool(
   {},
   async () => {
     const p = await getPage();
+    const pages = p.context().pages();
     return {
-      content: [{ type: 'text', text: JSON.stringify({ url: p.url(), title: await p.title() }) }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            url: p.url(),
+            title: await p.title(),
+            tabs: pages.map((x) => x.url()),
+            active: pages.indexOf(p),
+          }),
+        },
+      ],
     };
   }
 );
@@ -175,7 +188,43 @@ tool(
         }))
       )
       .catch(() => []);
-    return { content: [{ type: 'text', text: JSON.stringify({ btns, opts }) }] };
+    const inputs = await p
+      .locator('input, textarea')
+      .evaluateAll((els) =>
+        els.slice(0, 20).map((e) => {
+          const r = e.getBoundingClientRect();
+          const cs = window.getComputedStyle(e);
+          return {
+            type: e.type || e.tagName.toLowerCase(),
+            cls: (e.className || '').toString().slice(0, 50),
+            val: (e.value || '').slice(0, 20),
+            chk: !!e.checked,
+            vis: !!(e.offsetWidth || e.offsetHeight),
+            x: Math.round(r.x),
+            y: Math.round(r.y),
+            w: Math.round(r.width),
+            color: cs.color,
+            fs: cs.fontSize,
+            op: cs.opacity,
+            tr: cs.transform,
+          };
+        })
+      )
+      .catch(() => []);
+    const probe = await p.evaluate(() => {
+      const pts = [[400, 260], [265, 375], [600, 745]];
+      const hits = pts.map(([x, y]) => {
+        const el = document.elementFromPoint(x, y);
+        return el ? `${el.tagName}.${(el.className || '').toString().slice(0, 40)} @${x},${y}` : `null @${x},${y}`;
+      });
+      return {
+        hits,
+        frames: window.frames.length,
+        iframes: document.querySelectorAll('iframe').length,
+        h: document.body.innerText.slice(0, 120),
+      };
+    });
+    return { content: [{ type: 'text', text: JSON.stringify({ btns, opts, inputs, probe }) }] };
   }
 );
 
@@ -185,13 +234,13 @@ tool(
   { url: z.string() },
   async ({ url }) => {
     const p = await getPage();
-    await p.goto(url, { waitUntil: 'commit', timeout: 60000 });
+    await p.goto(url, { waitUntil: 'load', timeout: 60000 }).catch(() => {});
     await p
       .locator('button:has-text("Помощь"):visible, button:has-text("Начать"):visible, button:has-text("Дальше"):visible')
       .first()
       .waitFor({ state: 'visible', timeout: 30000 })
       .catch(() => {});
-    await sleep(400);
+    await sleep(1500);
     return { content: [{ type: 'text', text: p.url() }] };
   }
 );
@@ -331,12 +380,20 @@ tool(
   {},
   async () => {
     const p = await getPage();
-    const clicked = await clickButtonByText(p, SUBMIT_BUTTON_TEXTS);
-    if (!clicked) {
-      return { content: [{ type: 'text', text: 'error: кнопка «Ответить» не найдена или неактивна' }] };
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await p.keyboard.press('Escape').catch(() => {});
+      await sleep(200);
+      const title = p.locator('h1:visible, h2:visible, h3:visible, [class*="instruction"]:visible').first();
+      await title.click({ timeout: 1500 }).catch(() => {});
+      await sleep(400);
+      const clicked = await clickButtonByText(p, SUBMIT_BUTTON_TEXTS);
+      if (clicked) {
+        await sleep(1200);
+        return { content: [{ type: 'text', text: 'ok' }] };
+      }
+      await sleep(600);
     }
-    await sleep(1200);
-    return { content: [{ type: 'text', text: 'ok' }] };
+    return { content: [{ type: 'text', text: 'error: кнопка «Ответить» не найдена или неактивна' }] };
   }
 );
 
@@ -346,8 +403,9 @@ tool(
   {
     option: z.string().optional().describe('Текст варианта ответа или его номер (1-based)'),
     text: z.string().optional().describe('Текст для поля ввода'),
+    index: z.number().optional().describe('Номер поля ввода на карточке, начиная с 0'),
   },
-  async ({ option, text }) => {
+  async ({ option, text, index }) => {
     const p = await getPage();
     if (text !== undefined) {
       const inputs = p.locator(
@@ -355,7 +413,10 @@ tool(
       );
       const count = await inputs.count().catch(() => 0);
       let target = null;
-      for (let i = 0; i < count; i++) {
+      if (index !== undefined && index < count) {
+        target = inputs.nth(index);
+      }
+      for (let i = 0; target === null && i < count; i++) {
         const el = inputs.nth(i);
         const val = await el.inputValue().catch(() => null);
         if (val !== null && val === '') {
@@ -367,22 +428,22 @@ tool(
       if (!target) {
         return { content: [{ type: 'text', text: 'error: поле ввода не найдено' }] };
       }
-      await target.click();
-      await p.keyboard.press('Control+a');
-      await p.keyboard.press('Delete');
-      for (const ch of text) {
-        await p.keyboard.type(ch);
-        await sleep(rand(40, 110));
-      }
-      return { content: [{ type: 'text', text: 'ok' }] };
+      await target.click().catch(() => {});
+      await target.fill(text, { timeout: 3000 }).catch(() => {});
+      await sleep(300);
+      const val = await target.inputValue().catch(() => '');
+      return { content: [{ type: 'text', text: val === text ? 'ok' : 'error: значение не сохранилось (' + val + ')' }] };
     }
     if (option !== undefined) {
       const n = Number(option);
       const candidates = [];
       if (Number.isInteger(n) && n > 0) {
+        candidates.push(`input[type="checkbox"]:visible >> nth=${n - 1}`);
+        candidates.push(`input[type="radio"]:visible >> nth=${n - 1}`);
+        candidates.push(`label.checkbox:visible >> nth=${n - 1}`);
         candidates.push(`label.radio:visible >> nth=${n - 1}`);
         candidates.push(`label.marker:visible >> nth=${n - 1}`);
-        candidates.push(`[role="radio"]:visible, input[type="radio"]:visible >> nth=${n - 1}`);
+        candidates.push(`[role="radio"]:visible, [role="checkbox"]:visible >> nth=${n - 1}`);
       } else {
         candidates.push(`label:has-text("${option}"):visible >> nth=0`);
         candidates.push(`[role="radio"]:has-text("${option}"):visible >> nth=0`);
@@ -458,7 +519,7 @@ tool(
     const p = await getPage();
     const file = path.join(TMP_DIR, `shot-${Date.now()}.png`);
     await p.screenshot({ path: file });
-    return { content: [{ type: 'text', text: file }] };
+    return { content: [{ type: 'text', text: file + ' | ' + p.url() }] };
   }
 );
 
