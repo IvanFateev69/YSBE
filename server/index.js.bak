@@ -223,35 +223,25 @@ tool(
     if (!editor) {
       return { content: [{ type: 'text', text: 'error: редактор не найден' }] };
     }
+    await editor.click();
+    await sleep(150);
+    await p.keyboard.press('Control+a');
+    await p.keyboard.press('Delete');
+    await sleep(100);
     const lines = code.split('\n');
-    for (let attempt = 0; attempt < 3; attempt++) {
-      if (attempt > 0) await sleep(2500);
-      await editor.click();
-      await sleep(150);
-      await p.keyboard.press('Control+a');
-      await p.keyboard.press('Delete');
-      await sleep(100);
-      for (let i = 0; i < lines.length; i++) {
-        await p.keyboard.press('Shift+Home');
-        await sleep(rand(30, 70));
-        for (const ch of lines[i]) {
-          await p.keyboard.type(ch);
-          await sleep(rand(30, 90));
-        }
-        if (i < lines.length - 1) {
-          await p.keyboard.press('Enter');
-          await sleep(rand(80, 220));
-        }
+    for (let i = 0; i < lines.length; i++) {
+      await p.keyboard.press('Shift+Home');
+      await sleep(rand(30, 70));
+      for (const ch of lines[i]) {
+        await p.keyboard.type(ch);
+        await sleep(rand(30, 90));
       }
-      await sleep(300);
-      const content = (await p.locator('.cm-editor:visible .cm-content').first().innerText().catch(() => '')).trim();
-      const first = lines[0].trim();
-      const last = lines[lines.length - 1].trim();
-      if (content.includes(first) && content.includes(last)) {
-        return { content: [{ type: 'text', text: 'ok' }] };
+      if (i < lines.length - 1) {
+        await p.keyboard.press('Enter');
+        await sleep(rand(80, 220));
       }
     }
-    return { content: [{ type: 'text', text: 'error: код не появился в редакторе, повторите' }] };
+    return { content: [{ type: 'text', text: 'ok' }] };
   }
 );
 
@@ -282,7 +272,6 @@ tool(
       canSubmit = (await otvet.count()) > 0 && (await otvet.isEnabled().catch(() => false));
       if (!canSubmit) await sleep(500);
     }
-    if (canSubmit) await sleep(800);
     let details = '';
     const out = await firstVisible(p, [
       '[class*="tests"]',
