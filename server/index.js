@@ -179,7 +179,7 @@ tool(
       })
     );
     const opts = await p
-      .locator('label:visible, [role="radio"]:visible, [class*="option"]:visible, [class*="choice"]:visible, [class*="answer"]:not(button):visible')
+      .locator('label:visible, [role="radio"]:visible, [role="option"]:visible, [class*="option"]:visible, [class*="choice"]:visible, [class*="select__"]:visible, [class*="answer"]:not(button):visible')
       .evaluateAll((els) =>
         els.slice(0, 15).map((e) => ({
           tag: e.tagName,
@@ -199,14 +199,56 @@ tool(
             cls: (e.className || '').toString().slice(0, 50),
             val: (e.value || '').slice(0, 20),
             chk: !!e.checked,
+            ctx: (() => {
+              let n = e;
+              for (let k = 0; k < 6 && n; k++) {
+                n = n.previousElementSibling;
+                if (n && (n.innerText || '').trim().length > 1) {
+                  return n.innerText.replace(/\s+/g, ' ').slice(-80);
+                }
+              }
+              let a = e.parentElement;
+              for (let k = 0; k < 5 && a; k++) {
+                a = a.parentElement;
+                if (a && (a.innerText || '').trim().length > 5) {
+                  return a.innerText.replace(/\s+/g, ' ').slice(0, 80);
+                }
+              }
+              return '';
+            })(),
             vis: !!(e.offsetWidth || e.offsetHeight),
             x: Math.round(r.x),
             y: Math.round(r.y),
             w: Math.round(r.width),
             color: cs.color,
             fs: cs.fontSize,
-            op: cs.opacity,
-            tr: cs.transform,
+            bd: cs.borderColor + ' ' + cs.borderWidth + ' ' + cs.backgroundColor,
+            anc: (() => {
+              const out = [];
+              let a = e.parentElement;
+              for (let k = 0; k < 4 && a; k++, a = a.parentElement) {
+                const c = window.getComputedStyle(a);
+                if (c.backgroundColor !== 'rgba(0, 0, 0, 0)') out.push(c.backgroundColor);
+              }
+              return out.join(' | ').slice(0, 100);
+            })(),
+            html: (e.parentElement ? e.parentElement.outerHTML : '').replace(/\s+/g, ' ').slice(0, 260),
+            before: (() => {
+              try {
+                const r = document.evaluate('preceding::text()[1]', e, null, 9, null).singleNodeValue;
+                return r ? (r.textContent || '').replace(/\s+/g, ' ').slice(-70) : '';
+              } catch {
+                return '';
+              }
+            })(),
+            after: (() => {
+              try {
+                const r = document.evaluate('following::text()[1]', e, null, 9, null).singleNodeValue;
+                return r ? (r.textContent || '').replace(/\s+/g, ' ').slice(0, 70) : '';
+              } catch {
+                return '';
+              }
+            })(),
           };
         })
       )
@@ -221,10 +263,32 @@ tool(
         hits,
         frames: window.frames.length,
         iframes: document.querySelectorAll('iframe').length,
+        vw: window.innerWidth,
+        vh: window.innerHeight,
+        sy: window.scrollY,
         h: document.body.innerText.slice(0, 120),
       };
     });
-    return { content: [{ type: 'text', text: JSON.stringify({ btns, opts, inputs, probe }) }] };
+    const markers = await p
+      .locator('[class*="marker"], [class*="drag"], [class*="slot"], [class*="answer-item"]')
+      .evaluateAll((els) =>
+        els.slice(0, 30).map((e) => {
+          const r = e.getBoundingClientRect();
+          return {
+            tag: e.tagName,
+            cls: (e.className || '').toString().slice(0, 45),
+            text: (e.innerText || '').trim().slice(0, 25),
+            alt: (e.getAttribute && e.getAttribute('alt')) || '',
+            src: (e.getAttribute && e.getAttribute('src')) || '',
+            x: Math.round(r.x),
+            y: Math.round(r.y),
+            w: Math.round(r.width),
+            h: Math.round(r.height),
+          };
+        })
+      )
+      .catch(() => []);
+    return { content: [{ type: 'text', text: JSON.stringify({ btns, opts, inputs, probe, markers }) }] };
   }
 );
 
@@ -508,6 +572,82 @@ tool(
     await sleep(1500);
     const url = p.url();
     return { content: [{ type: 'text', text: 'ok: ' + clicked + ' -> ' + url.split('/').slice(-2)[0] }] };
+  }
+);
+
+tool(
+  'click',
+  'Нажать на элемент по CSS-селектору',
+  { sel: z.string() },
+  async ({ sel }) => {
+    const p = await getPage();
+    try {
+      await p.locator(sel).first().click({ timeout: 4000, force: true });
+      await sleep(400);
+      return { content: [{ type: 'text', text: 'ok' }] };
+    } catch (e) {
+      return { content: [{ type: 'text', text: 'error: ' + String(e.message || e).split('\n')[0].slice(0, 200) }] };
+    }
+  }
+);
+
+tool(
+  'drag',
+  'Перетащить элемент (0-based) в слот (0-based) на карточке с перетаскиванием',
+  {
+    from: z.number().describe('Индекс перетаскиваемого элемента (0-based)'),
+    to: z.number().describe('Индекс целевого слота (0-based)'),
+  },
+  async ({ from, to }) => {
+    const p = await getPage();
+    const choices = p.locator('.marker-dragimage__choice:visible');
+    const fields = p.locator('.marker-dragimage__field');
+    const nc = await choices.count().catch(() => 0);
+    const nf = await fields.count().catch(() => 0);
+    if (from >= nc || to >= nf) {
+      return { content: [{ type: 'text', text: `error: from=${nc} to=${nf}` }] };
+    }
+    const src = await choices.nth(from).boundingBox();
+    const dst = await fields.nth(to).boundingBox();
+    if (!src || !dst) {
+      return { content: [{ type: 'text', text: 'error: элементы не найдены' }] };
+    }
+    await choices.nth(from).scrollIntoViewIfNeeded().catch(() => {});
+    await sleep(300);
+    let lastErr = '';
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await p.dragAndDrop(
+          `.marker-dragimage__choice:visible >> nth=${from}`,
+          `.marker-dragimage__field >> nth=${to}`,
+          { steps: 15, force: true }
+        );
+        await sleep(500);
+        return { content: [{ type: 'text', text: 'ok' }] };
+      } catch (e) {
+        lastErr = String(e.message || e).split('\n')[0];
+        await sleep(700);
+        await choices.nth(from).scrollIntoViewIfNeeded().catch(() => {});
+      }
+    }
+    const box2 = await choices.nth(from).boundingBox();
+    const fb2 = await fields.nth(to).boundingBox();
+    if (box2 && fb2) {
+      const sx = box2.x + box2.width / 2;
+      const sy = box2.y + box2.height / 2;
+      await p.mouse.move(sx, sy);
+      await sleep(100);
+      await p.mouse.down();
+      await sleep(250);
+      await p.mouse.move(sx + 5, sy + 3, { steps: 3 });
+      await sleep(300);
+      await p.mouse.move(fb2.x, fb2.y, { steps: 25 });
+      await sleep(400);
+      await p.mouse.up();
+      await sleep(600);
+      return { content: [{ type: 'text', text: 'ok(fallback)' }] };
+    }
+    return { content: [{ type: 'text', text: 'error: ' + lastErr.slice(0, 250) }] };
   }
 );
 
