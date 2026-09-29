@@ -117,6 +117,12 @@ async function clickButtonByText(p, texts) {
     for (let i = 0; i < n; i++) {
       const el = locs.nth(i);
       if (await el.isVisible().catch(() => false)) {
+        const inPad = await el
+          .evaluate((e) =>
+            !!e.closest('[class*="keypad"], [class*="Keyboard"], [class*="numpad"], [class*="virtual-keyboard"], [class*="NumberPad"]')
+          )
+          .catch(() => false);
+        if (inPad) continue;
         try {
           await el.click({ timeout: 3000 });
           return t;
