@@ -233,6 +233,17 @@ tool(
               return out.join(' | ').slice(0, 100);
             })(),
             html: (e.parentElement ? e.parentElement.outerHTML : '').replace(/\s+/g, ' ').slice(0, 260),
+            bg: (() => {
+              const blk = e.closest('[class*="problem-block"]') || e.parentElement;
+              if (!blk) return 'NONE';
+              const imgs = [...blk.querySelectorAll('img')].map(
+                (x) => Math.round(x.getBoundingClientRect().x) + ':' + x.src
+              );
+              if (imgs.length) return imgs.join(' | ').slice(0, 400);
+              const cvs = [...blk.querySelectorAll('canvas')];
+              if (cvs.length) return 'CANVAS' + cvs.length;
+              return 'NONE';
+            })(),
             before: (() => {
               try {
                 const r = document.evaluate('preceding::text()[1]', e, null, 9, null).singleNodeValue;
@@ -272,7 +283,7 @@ tool(
     const markers = await p
       .locator('[class*="marker"], [class*="drag"], [class*="slot"], [class*="answer-item"]')
       .evaluateAll((els) =>
-        els.slice(0, 30).map((e) => {
+        els.slice(0, 100).map((e) => {
           const r = e.getBoundingClientRect();
           return {
             tag: e.tagName,
@@ -280,6 +291,7 @@ tool(
             text: (e.innerText || '').trim().slice(0, 25),
             alt: (e.getAttribute && e.getAttribute('alt')) || '',
             src: (e.getAttribute && e.getAttribute('src')) || '',
+            bi: window.getComputedStyle(e).backgroundImage.includes('url') ? window.getComputedStyle(e).backgroundImage.slice(0, 220) : '',
             x: Math.round(r.x),
             y: Math.round(r.y),
             w: Math.round(r.width),
@@ -341,7 +353,7 @@ tool(
     }
     text = cleanText(text);
     if (type === 'theory') {
-      text = text.slice(0, 180);
+      text = text.slice(0, 1000);
     } else if (type === 'quiz') {
       text = text.slice(0, 1200);
     } else {
@@ -588,6 +600,18 @@ tool(
     } catch (e) {
       return { content: [{ type: 'text', text: 'error: ' + String(e.message || e).split('\n')[0].slice(0, 200) }] };
     }
+  }
+);
+
+tool(
+  'click_at',
+  'Нажать на элемент по координатам (x, y)',
+  { x: z.number(), y: z.number() },
+  async ({ x, y }) => {
+    const p = await getPage();
+    await p.mouse.click(x, y);
+    await sleep(350);
+    return { content: [{ type: 'text', text: 'ok' }] };
   }
 );
 
