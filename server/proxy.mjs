@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs';
 
-const FIFO = '/tmp/mcp-fifo';
-const OUT = '/tmp/mcp-out.jsonl';
+const FIFO = process.env.HOME + '/.ysbe/mcp.fifo';
+const OUT = process.env.HOME + '/.ysbe/mcp.out.jsonl';
 
 const child = spawn('node', ['index.js'], {
   stdio: ['pipe', 'pipe', 'inherit'],

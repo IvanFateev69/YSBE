@@ -278,6 +278,12 @@ tool(
       });
       return {
         hits,
+        imgs: [...document.querySelectorAll('img')]
+          .map((x) => {
+            const r = x.getBoundingClientRect();
+            return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), src: x.src };
+          })
+          .filter((o) => o.w > 30),
         frames: window.frames.length,
         iframes: document.querySelectorAll('iframe').length,
         vw: window.innerWidth,
