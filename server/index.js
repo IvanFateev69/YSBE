@@ -616,6 +616,27 @@ tool(
 );
 
 tool(
+  'mouse_drag',
+  'Перетащить курсором из точки (x1,y1) в точку (x2,y2) с нажатой кнопкой',
+  { x1: z.number(), y1: z.number(), x2: z.number(), y2: z.number() },
+  async ({ x1, y1, x2, y2 }) => {
+    const p = await getPage();
+    await p.mouse.move(x1, y1);
+    await sleep(150);
+    await p.mouse.down();
+    await sleep(250);
+    for (let i = 1; i <= 12; i++) {
+      await p.mouse.move(x1 + ((x2 - x1) * i) / 12, y1 + ((y2 - y1) * i) / 12);
+      await sleep(70);
+    }
+    await sleep(300);
+    await p.mouse.up();
+    await sleep(400);
+    return { content: [{ type: 'text', text: 'ok' }] };
+  }
+);
+
+tool(
   'click_at',
   'Нажать на элемент по координатам (x, y)',
   { x: z.number(), y: z.number() },
